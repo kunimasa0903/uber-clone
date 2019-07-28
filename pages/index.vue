@@ -8,9 +8,13 @@
         </v-btn>
       lat:{{location.lat}}
       lng:{{location.lng}}
-      <v-btn fab color="secondary" @click="searchTaxi">
+      <v-btn fab color="secondary" @click="searchTaxi(1)">
         <v-icon>mdi-taxi</v-icon>
       </v-btn>
+      <v-btn fab color="secondary" @click="createTaxi">
+        <v-icon>mdi-plus</v-icon>
+      </v-btn>
+
     </v-container>
 
       <GmapMap
@@ -24,16 +28,41 @@
           :position="m.position"
           :clickable="true"
           :draggable="false"
-          :icon="icon"
-          @click="toggleInfo(m,index)"
+          :icon="m.icon || icon"
+          @click="m.onClick"
         />
       </GmapMap>
-      <v-dialog v-model="infoOpened">
+      <v-dialog v-model="infoOpened" max-width="500px">
         <v-card light>
           <v-container>
             <v-layout column wrap justify-center align-center>
               <h2 class="pa-3">Hey, TAXI!</h2>
-              <v-icon size="56">mdi-taxi</v-icon>
+              <v-icon size="56" v-if="!target.carPhotoUrl">mdi-taxi</v-icon>
+              <v-container v-if="target.driver">
+                  <v-layout justify-center xs12>
+                    <v-avatar size="60">
+                      <v-img :src="target.carPhotoUrl"/>
+                    </v-avatar>
+                    <v-avatar size="60">
+                      <v-img :src="target.driver.faceUrl"/>
+                    </v-avatar>
+                  </v-layout>
+                  <v-layout justify-center xs12>
+                    <h2>{{target.driver.name}}</h2>
+                  </v-layout >
+                  <v-layout justify-center xs12>
+                    <v-subheader>{{target.driver.description}}</v-subheader>
+                  </v-layout >
+                  <v-layout justify-center xs12>
+                    <v-rating v-model="target.driver.rate"
+                      color="yellow darken-3"
+                      background-color="grey darken-1"
+                      empty-icon="$vuetify.icons.ratingFull"
+                      half-increments
+                      hover readonly/>
+                  </v-layout>
+              </v-container>
+                  
               <v-btn color="primary" rounded ><v-icon left>mdi-human-handsup</v-icon>Request</v-btn>
               <v-btn class="mt-4" color="success" text><v-icon left>mdi-phone</v-icon>Call</v-btn>
             </v-layout>
@@ -55,59 +84,8 @@ Vue.use(VueGoogleMaps, {
   },
   installComponents: true
 })
-function boundingBoxCoordinates(center, radius) {
-  const KM_PER_DEGREE_LATITUDE = 110.574;
-  const latDegrees = radius / KM_PER_DEGREE_LATITUDE;
-  const latitudeNorth = Math.min(90, center.lat + latDegrees);
-  const latitudeSouth = Math.max(-90, center.lat - latDegrees);
-  // calculate longitude based on current latitude
-  const longDegsNorth = metersToLongitudeDegrees(radius, latitudeNorth);
-  const longDegsSouth = metersToLongitudeDegrees(radius, latitudeSouth);
-  const longDegs = Math.max(longDegsNorth, longDegsSouth);
-  return {
-    swCorner: { // bottom-left (SW corner)
-      latitude: latitudeSouth,
-      longitude: wrapLongitude(center.lng - longDegs),
-    },
-    neCorner: { // top-right (NE corner)
-      latitude: latitudeNorth,
-      longitude: wrapLongitude(center.lng + longDegs),
-    },
-  };
 
-  function metersToLongitudeDegrees(distance, latitude) {
-    const EARTH_EQ_RADIUS = 6378137.0;
-    // this is a super, fancy magic number that the GeoFire lib can explain (maybe)
-    const E2 = 0.00669447819799;
-    const EPSILON = 1e-12;
-    const radians = degreesToRadians(latitude);
-    const num = Math.cos(radians) * EARTH_EQ_RADIUS * Math.PI / 180;
-    const denom = 1 / Math.sqrt(1 - E2 * Math.sin(radians) * Math.sin(radians));
-    const deltaDeg = num * denom;
-    if (deltaDeg < EPSILON) {
-      return distance > 0 ? 360 : 0;
-    }
-    // else
-    return Math.min(360, distance / deltaDeg);
-
-    function degreesToRadians(degrees) {
-      return (degrees * Math.PI) / 180;
-    }
-  }
-
-  function wrapLongitude(longitude) {
-    if (longitude <= 180 && longitude >= -180) {
-      return longitude;
-    }
-    const adjusted = longitude + 180;
-    if (adjusted > 0) {
-      return (adjusted % 360) - 180;
-    }
-    // else
-    return 180 - (-adjusted % 360);
-  }
-}
-
+import geohash from 'ngeohash'
 
 export default {
   data(){
@@ -118,23 +96,50 @@ export default {
       mapWidth:window.innerWidth*0.8,
       mapHeight:window.innerHeight*0.5,
       icon: {
-        url: require('@/static/taxi.png'),
+        url: require('@/static/v.png'),
         size: {width: 30, height: 30, f: 'px', b: 'px'},
         scaledSize: {width: 30, height: 30, f: 'px', b: 'px'}
       },
       infoOpened: false,
-      additionalMarkers:[]
+      infoIndex:0,
+      target:{},
+      additionalMarkers:[],
+      taxies:[]
     }
   },
   computed:{
     markers(){
-      return [{
-        position:{
-          lat:this.location.lat,
-          lng:this.location.lng
+      const icon =(url)=>({
+          url:url,
+          size: {width: 30, height: 30, f: 'px', b: 'px'},
+          scaledSize: {width: 30, height: 30, f: 'px', b: 'px'}
+      })
+
+      const vm = this;
+      return [
+        {
+          position:{
+            lat:this.location.lat,
+            lng:this.location.lng
+          },
+          icon:icon("./v.png")
         },
-        title:"you are here."
-      },...this.additionalMarkers]
+        ...this.additionalMarkers,
+        ...this.taxies.map(taxi=>({
+          position:{
+            lat:taxi.location.lat,
+            lng:taxi.location.lng
+          },
+          icon:icon("./taxi.png"),
+          onClick(){
+            vm.target=taxi;
+            vm.infoOpened=true;
+          }
+        }))
+      ].map(e=>{
+        e.onClick = e.onClick || function(){}
+        return e
+      })
     }
   },
   methods:{
@@ -172,20 +177,56 @@ export default {
     },
     toggleInfo(m,i){
       this.infoOpened=!this.infoOpened
+      this.infoIndex = i;
     },
-    searchTaxi(){
-      const radius = 0.0001;
-      const ne = new this.$GeoPoint(this.location.lat+radius,this.location.lng+radius)
-      const sw = new this.$GeoPoint(this.location.lat-radius,this.location.lng-radius)
-      this.$firestore.collection('taxies')
-        .where('geoPoint','>=',sw)
-        .where('geoPoint','<=',ne)
-        .limit(10)
+    searchTaxi(distance){
+      const {GeoFirestore} = require('geofirestore')
+      const geofirestore = new GeoFirestore(this.$firestore)
+
+      console.log({distance})
+      geofirestore
+        .collection('taxies')
+        .near({
+          center: new this.$GeoPoint(this.location.lat, this.location.lng),
+          radius: distance })
         .get()
         .then(query=>{　// [<firestore query>,<firebase query>]
-          const taxies = query.docs.map(doc=>doc.data()) // {name:"...",...}
-          console.table(taxies)
+          console.log({query})
+          this.taxies = query.docs.map(doc=>doc.data()) // {name:"...",...}
+          console.table(this.taxies)
         })
+
+      return
+    },
+    createTaxi(){
+
+      const lat = this.location.lat +  (Math.random() - Math.random())/1000
+      const lng = this.location.lng + (Math.random() - Math.random())/1000
+      this.$firestore.collection('taxies').add({
+        d:{
+          carPhotoUrl:"https://picture1.goo-net.com/7001101360/30190527/J/70011013603019052700100.jpg",
+          carType:"figaro",
+          driver:{
+            name:"吉岡里帆",
+            faceUrl:"https://www.ateam-japan.com/wp-content/uploads/0807.jpg",
+            phone:"090-0000-0000",
+            rate:4.8,
+            description:"" + Math.random()
+          },
+          number:"AAA",
+          location:{lat:lat,lng:lng}
+        },
+        g:geohash.encode(lat,lng,8),
+        l:new this.$GeoPoint(lat,lng),
+        createdAt:Date.now()
+      })
+
+      return
+      /*
+      import * as geofirex from 'geofirex'
+      const geo = geofirex.init(this.$firestore);
+      const ta
+      */
     }
   },
   watch:{

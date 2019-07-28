@@ -30,7 +30,8 @@ export default {
   ** Plugins to load before mounting the App
   */
   plugins: [
-    "@/plugins/firebase"
+    "@/plugins/firebase",
+    "@/plugins/geo"
   ],
   /*
   ** Nuxt.js dev-modules
