@@ -9,8 +9,11 @@
             v-model="email"
           ></v-text-field>
           <v-text-field
+            :append-icon="showPW ? 'mdi-eye' : 'mdi-eye-off'"
+            @click:append="showPW=!showPW"
             label="password"
             placeholder="pass"
+            :type="showPW?`text`:`password`"
             v-model="password"
           ></v-text-field>
           <v-layout justify-center>
@@ -29,7 +32,8 @@ export default {
       email:null,
       password:null,
       loading:false,
-      errText:null
+      errText:null,
+      showPW:false
     }
   },
   methods:{

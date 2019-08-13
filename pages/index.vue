@@ -1,25 +1,71 @@
 <template>
   <div>
-    <v-container>
-      <v-btn text @click="get" color="primary">get</v-btn>
-      {{hoge}}
-        <v-btn @click="getLocation" color="info" fab :loading="loading">
-          <v-icon>mdi-crosshairs-gps</v-icon>
+      <!-- floating buttons -->
+      <v-speed-dial
+        absolute
+        v-model="dial"
+        top
+        right
+        direction="bottom"
+        transition="slide-y-reverse-transition"
+      >
+        <template v-slot:activator>
+          <v-btn
+            v-model="dial"
+            color="secondary"
+            dark
+            small
+            fab
+          >
+            <v-icon v-if="dial">mdi-close</v-icon>
+            <v-icon v-else>mdi-settings</v-icon>
+          </v-btn>
+        </template>
+        <v-btn
+          fab
+          dark
+          small
+          @click="searchTaxi(1000)"
+        >
+          <v-icon>mdi-taxi</v-icon>
         </v-btn>
-      lat:{{location.lat}}
-      lng:{{location.lng}}
-      <v-btn fab color="secondary" @click="searchTaxi(1)">
-        <v-icon>mdi-taxi</v-icon>
-      </v-btn>
-      <v-btn fab color="secondary" @click="createTaxi">
-        <v-icon>mdi-plus</v-icon>
-      </v-btn>
+        <v-btn
+          fab
+          dark
+          small
+          @click="createTaxi"
+        >
+          <v-icon>mdi-plus</v-icon>
+        </v-btn>
+        <v-btn
+          fab
+          dark
+          small
+          to="/login"
+        >
+          <v-icon>mdi-logout</v-icon>
+        </v-btn>
+      </v-speed-dial>
 
-    </v-container>
+      <!-- floatin taxi button -->
+      <v-layout absolute justify-center align-end style="position:absolute; width:100%;height:95%">
+        <v-btn absolute fab class="secondary"><v-icon>mdi-taxi</v-icon></v-btn>
+      </v-layout>
 
+      <!-- google map -->
       <GmapMap
         :center="{lat:location.lat, lng:location.lng}"
         :zoom="18"
+        :options="{
+          fullscreenControl:false,
+          mapTypeControl:false,
+          streetViewControl: false,
+          scaleControl:false,
+          panControl:false,
+          zoomControl:false,
+          backgroundColor:`white`,
+          styles:mapStyle
+        }"
         style="width:100vw;height:100vh"
       >
         <GmapMarker
@@ -32,9 +78,14 @@
           @click="m.onClick"
         />
       </GmapMap>
-      <v-dialog v-model="infoOpened" max-width="500px">
+
+      <!-- taxi dialog -->
+      <v-dialog v-model="dialogs.infoOpened" max-width="500px" persistent>
         <v-card light>
           <v-container>
+            <v-layout justify-end >
+              <v-btn text small color="white" fab @click="dialogs.infoOpened=false"><v-icon color="grey">mdi-close</v-icon></v-btn>
+            </v-layout>
             <v-layout column wrap justify-center align-center>
               <h2 class="pa-3">Hey, TAXI!</h2>
               <v-icon size="56" v-if="!target.carPhotoUrl">mdi-taxi</v-icon>
@@ -62,21 +113,63 @@
                       hover readonly/>
                   </v-layout>
               </v-container>
-                  
-              <v-btn color="primary" rounded ><v-icon left>mdi-human-handsup</v-icon>Request</v-btn>
+
+              <v-btn color="primary" rounded @click="dialogs.infoOpened=false"><v-icon left>mdi-human-handsup</v-icon>Request</v-btn>
               <v-btn class="mt-4" color="success" text><v-icon left>mdi-phone</v-icon>Call</v-btn>
             </v-layout>
 
           </v-container>
         </v-card>
       </v-dialog>
-      <v-btn color="info" @click="move" v-show="location.lat" fab><v-icon>mdi-walk</v-icon></v-btn>
+
+      <!-- geolocation dialog -->
+      <v-dialog v-model="dialogs.alertionGetLocation" max-width="500px" persistent>
+        <v-card light>
+          <v-container>
+            <v-layout column wrap justify-center align-center>
+              <h2 class="pa-3">We will get your location</h2>
+              <v-icon size="56" class="mb-5">mdi-crosshairs-gps</v-icon>
+              <h5 style="color:grey">If our service shall be started, you should allow it to get your GPS location. Please attach the permittion (push "OK" button) if alert dialog pops on the your display.</h5>
+              <v-layout justify-end align-center class="mt-5" style="width:100%">
+                <v-btn color="primary" outlined @click="allowGetLocation" ><v-icon left>mdi-thumb-up</v-icon>Confirmed</v-btn>
+                <v-btn  color="error" text to="/login">Deny</v-btn>
+              </v-layout>
+            </v-layout>
+          </v-container>
+        </v-card>
+      </v-dialog>
+
+      <!-- geolocation error dialog -->
+      <v-dialog v-model="dialogs.alertionCannotGetLocation" max-width="500px" persistent>
+        <v-card light>
+          <v-container>
+            <v-layout column wrap justify-center align-center>
+              <h2 class="pa-3" color="error">GPS is not suppored in your device or browser</h2>
+              <v-layout justify-end align-center class="mt-5" style="width:100%">
+                <v-btn color="primary" outlined @click="allowGetLocation" ><v-icon left>mdi-thumb-up</v-icon>Confirmed</v-btn>
+              </v-layout>
+            </v-layout>
+          </v-container>
+        </v-card>
+      </v-dialog>
+
+      <!-- loading dialog -->
+      <v-dialog v-model="loading" persistent max-width="300">
+        <v-card color="primary" dark>
+          <v-card-text>
+            {{loadingText||'Loading...'}}
+          </v-card-text>
+          <v-progress-linear indeterminate color="white" class="mb-0"></v-progress-linear>
+        </v-card>
+      </v-dialog>
+
   </div>
 </template>
 
 <script>
 import Vue from 'vue'
 import * as VueGoogleMaps from 'vue2-google-maps'
+import mapStyle from '@/static/mapStyle.json'
 
 Vue.use(VueGoogleMaps, {
   load: {
@@ -90,21 +183,28 @@ import geohash from 'ngeohash'
 export default {
   data(){
     return {
+      dial:false,
       hoge:null,
       location:{},
       loading:false,
+      loadingText:"",
       mapWidth:window.innerWidth*0.8,
       mapHeight:window.innerHeight*0.5,
+      mapStyle:mapStyle,
       icon: {
         url: require('@/static/v.png'),
         size: {width: 30, height: 30, f: 'px', b: 'px'},
         scaledSize: {width: 30, height: 30, f: 'px', b: 'px'}
       },
-      infoOpened: false,
       infoIndex:0,
       target:{},
       additionalMarkers:[],
-      taxies:[]
+      taxies:[],
+      dialogs:{
+        alertionGetLocation:false,
+        alertionCannotGetLocation:false,
+        infoOpened:false
+      }
     }
   },
   computed:{
@@ -133,13 +233,20 @@ export default {
           icon:icon("./taxi.png"),
           onClick(){
             vm.target=taxi;
-            vm.infoOpened=true;
+            vm.dialogs.infoOpened=true;
           }
         }))
       ].map(e=>{
         e.onClick = e.onClick || function(){}
         return e
       })
+    }
+  },
+  mounted(){
+    if(navigator.geolocation){
+      this.dialogs.alertionGetLocation = true;
+    }else{
+      this.dialogs.alertionCannotGetLocation = true;
     }
   },
   methods:{
@@ -158,6 +265,7 @@ export default {
     },
     getLocation(){
       this.loading = true;
+      this.loadingText ="Getting your location..."
       navigator.geolocation.getCurrentPosition(location=>{
         this.location = {
           lat:location.coords.latitude,
@@ -165,10 +273,15 @@ export default {
           timestamp:location.timestamp
         }
         this.loading=false
+        this.searchTaxi(1000)
       },err=>{
         console.error(err)
         this.loading=false
       });
+    },
+    allowGetLocation(){
+      this.dialogs.alertionGetLocation=false
+      this.getLocation();
     },
     move(){
       if(!this.location.lat || !this.location.lng) return;
@@ -176,7 +289,7 @@ export default {
       this.location.lng += (Math.random() - Math.random())/10000
     },
     toggleInfo(m,i){
-      this.infoOpened=!this.infoOpened
+      this.dialogs.infoOpened=!this.dialogs.infoOpened
       this.infoIndex = i;
     },
     searchTaxi(distance){
@@ -184,19 +297,23 @@ export default {
       const geofirestore = new GeoFirestore(this.$firestore)
 
       console.log({distance})
+
+      this.loading=true;
+      this.loadingText = `Taxi searching... : within ${distance} m`
       geofirestore
         .collection('taxies')
         .near({
           center: new this.$GeoPoint(this.location.lat, this.location.lng),
-          radius: distance })
+          radius: distance/1000 })
         .get()
         .then(query=>{　// [<firestore query>,<firebase query>]
           console.log({query})
           this.taxies = query.docs.map(doc=>doc.data()) // {name:"...",...}
           console.table(this.taxies)
         })
-
-      return
+        .finally(()=>{
+          this.loading=false;
+        })
     },
     createTaxi(){
 
@@ -220,13 +337,6 @@ export default {
         l:new this.$GeoPoint(lat,lng),
         createdAt:Date.now()
       })
-
-      return
-      /*
-      import * as geofirex from 'geofirex'
-      const geo = geofirex.init(this.$firestore);
-      const ta
-      */
     }
   },
   watch:{
@@ -237,6 +347,9 @@ export default {
         .then(()=>{
           console.info("updated",geoPoint)
         })
+    },
+    "dialogs.infoOpened":(val)=>{
+      console.log({val})
     }
   }
 }
